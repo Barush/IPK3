@@ -93,6 +93,7 @@ int main(int argc, char **argv){
 	in_addr_t dest_address = 0x7f000001;		//localhost
 	int sel;
 
+	vector<string> XMLpackets;
 	vector<int> timers;
     vector<int> acks;
 
@@ -145,13 +146,13 @@ int main(int argc, char **argv){
 	tv.tv_usec = 0;
 
     //promenne potrebne uvnitr while cyklu
-    int packet_id = 0, acked, inputFinished = 0;
+    int packet_id = 0, acked, to_send = 0;
     string packet = "";
-    char c;
-    int end = 0;
+    int end = 0, lastSend = 0, acking = 0;
     int window_size = 1;
     timeval timer;
     int tack;
+    int timeout1 = 1000, timeout2 = 1000, timeout3 = 1000, timeout;
 
 	while((sel = select(udt + 1, &udt_stdin, NULL, NULL, &tv)) && !end){
 		if(sel == -1){
@@ -160,44 +161,56 @@ int main(int argc, char **argv){
 		}
 
 		//posilani paketu
-		if(!inputFinished){
-			for(int i = 0; i < window_size; i++){
-				inputFinished = readPacket(&packet);
-				gettimeofday(&timer, NULL);
-				tack = timer.tv_usec / 1000.0;
-				packet = createXML(packet_id, packet, window_size, tack);
-				cout << packet;
-				if(!udt_send(udt, dest_address, dest_port, (void *)packet.c_str(), packet.size())){
+		if(!lastSend && !acking){
+			for(int i = to_send; i < to_send + window_size; i++){
+				//posledni posilani se zdarilo
+				if(packet_id == to_send){
+					lastSend = readPacket(&packet);
+					gettimeofday(&timer, NULL);
+					tack = timer.tv_usec / 1000;
+					timeout = (tack + ((2*timeout1 + timeout2 + timeout3) / 4) )/2;
+					timeout *= 1.3;
+					packet = createXML(packet_id, packet, window_size, timeout);
+					XMLpackets.push_back(packet);
+					timers.push_back(timeout);
+					acks.push_back(0);
+				}
+				cout << "ze struktury: " << endl << XMLpackets.at(i);
+				if(!udt_send(udt, dest_address, dest_port, (void *)XMLpackets.at(i).c_str(), XMLpackets.at(i).size())){
 					cerr << "Nastala chyba pri volani udt_send!" << endl;
 					return EXIT_FAILURE;
 				}
-				timers.push_back(0);
-				acks.push_back(0);
+				acking = 1;
 				timers.at(packet_id) = tack;
-				cout << "Tack: " << timers[packet_id];
 				packet_id++;
-				if(inputFinished)
+				if(lastSend)
 					break;
 			}
 		}
 
 		//prijimani acks
-		if(udt_recv(udt, &packet, 500, NULL, NULL)){
+		if(udt_recv(udt, &packet, 500, &dest_address, &dest_port)){
 			acked = getPackId(packet);
-			for(int i = 0; i <= acked; i++){
+			acked++;
+			to_send = acked;
+			for(int i = 0; i < acked; i++){
 				acks.at(i) = 1;
 			}
+			window_size *= 2;
+			acking = 0;
 		}
 
-		//prisly nam vsechny acks
-		if(acks.at(acks.size() - 1) == 1){
-			cout << "Was in..." << endl;
-			end = 1;
-			for(int i = 0; i < acks.size(); i++){
-				if(acks.at(i) != 1)
-					end = 0; 
-			}
+		//vyprsel casovac
+		gettimeofday(&timer, NULL);
+		tack = timer.tv_usec / 1000;
+		if( (acks.at(packet_id - 1) == 0) && (tack > timers.at(packet_id - 1)) ){
+			lastSend = 0;
+			acking = 0;
 		}
+
+		//prisly nam vsechny acks - pokud je potvrzen posledni, potvrzuje tim i vsechny predchazejici
+		if(acks.at(acks.size() - 1) == 1)
+			end = 1;
 
 	}
 
