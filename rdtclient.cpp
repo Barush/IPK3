@@ -12,13 +12,13 @@
 #include <vector>
 #include <time.h>
 #include <sstream>
+#include <signal.h>
 
 //soubor obsahujici funkce pro vyuziti udt prenosu
 #include "udt.h"
 
 //konstanty pro nastaveni vlastnosti programu
 #define PACK_DATA_SIZE 300
-#define RTT 1000
 
 using namespace std;
 
@@ -81,6 +81,8 @@ int readPacket(string *data){
 		*data += c;
 		count++;
 	}
+
+	//cout << *data << endl;
 
 	if(c == EOF)
 		return 1;
@@ -192,14 +194,14 @@ int main(int argc, char **argv){
 
 		//prijimani acks
 		if(udt_recv(udt, tempstr, 500, &dest_address, &dest_port)){
+			packet = "";
 			packet.append(tempstr);
 			gettimeofday(&timer, NULL);
 			tack = timer.tv_usec / 1000;
 			timeout3 = timeout2;
 			timeout2 = timeout1;
 			timeout1 = tack - getTack(packet);
-			acked = getPackId(packet);
-			cout << "Got acked: " << acked << endl;	
+			acked = getPackId(packet);	
 			acks.at(acked) = 1;
 			acked++;
 			to_send = acked;
@@ -210,17 +212,28 @@ int main(int argc, char **argv){
 		//vyprsel casovac
 		gettimeofday(&timer, NULL);
 		tack = timer.tv_usec / 1000;
-		if( acking && (acks.at(packet_id - 1) == 0) && (tack > timers.at(packet_id - 1)) ){
-			cout << "Timeout" << endl;
-			window_size--;
-			lastSend = 0;
-			acking = 0;
+		if(acking){
+			for(unsigned i = 0; i < acks.size(); i++){
+				if((acks.at(i) == 0) && (tack > timers.at(i)) ){
+					to_send = i;
+					window_size /= 3;
+					if(window_size < 1)
+						window_size = 1;
+					lastSend = 0;
+					acking = 0;
+					break;
+				}
+			}
 		}
 
 		//prisly nam vsechny acks - pokud je potvrzen posledni, potvrzuje tim i vsechny predchazejici
 		if(lastSend && (acks.at(acks.size() - 1) == 1))
 			end = 1;
 
+	}
+
+	for(int i = 0; i < acks.size(); i++){
+		cout << i << ". ack:" << acks[i] << endl;
 	}
 
 	return 0;
