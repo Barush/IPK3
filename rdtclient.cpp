@@ -12,7 +12,6 @@
 #include <vector>
 #include <time.h>
 #include <sstream>
-#include <signal.h>
 
 //soubor obsahujici funkce pro vyuziti udt prenosu
 #include "udt.h"
@@ -180,11 +179,12 @@ int main(int argc, char **argv){
 					packet_id++;
 				}
 				//cout << "Pack id: " << packet_id << " to_send: " << to_send  << " i:" << i << endl;
-				cout << "ze struktury: " << endl << XMLpackets.at(i);
+				cerr << "ze struktury: " << i << ":" << endl << XMLpackets.at(i);
 				if(!udt_send(udt, dest_address, dest_port, (void *)XMLpackets.at(i).c_str(), XMLpackets.at(i).size())){
 					//cerr << "Nastala chyba pri volani udt_send!" << endl;
 					//return EXIT_FAILURE;
 				}
+				cerr << "Something send" << endl;
 				acking = 1;
 				timers.at(i) = tack;
 				if(lastSend)
@@ -194,6 +194,7 @@ int main(int argc, char **argv){
 
 		//prijimani acks
 		if(udt_recv(udt, tempstr, 500, &dest_address, &dest_port)){
+			cerr << "Tramtadaaaaa" << endl;
 			packet = "";
 			packet.append(tempstr);
 			gettimeofday(&timer, NULL);
@@ -203,7 +204,10 @@ int main(int argc, char **argv){
 			timeout1 = tack - getTack(packet);
 			acked = getPackId(packet);	
 			acks.at(acked) = 1;
-			acked++;
+			for(; acked < acks.size(); acked++){
+				if(acks.at(acked) == 0)
+					break;
+			}
 			to_send = acked;
 			window_size++;
 			acking = 0;
@@ -214,13 +218,15 @@ int main(int argc, char **argv){
 		tack = timer.tv_usec / 1000;
 		if(acking){
 			for(unsigned i = 0; i < acks.size(); i++){
-				if((acks.at(i) == 0) && (tack > timers.at(i)) ){
+				if( (acks.at(i) == 0) && (tack > timers.at(i)) ){
 					to_send = i;
 					window_size /= 3;
 					if(window_size < 1)
 						window_size = 1;
 					lastSend = 0;
 					acking = 0;
+					cerr << "Here..." << i << "window: " << window_size << endl;
+					cerr << tack << ">" << timers.at(i) << endl;
 					break;
 				}
 			}
@@ -232,9 +238,9 @@ int main(int argc, char **argv){
 
 	}
 
-	for(int i = 0; i < acks.size(); i++){
+	/*for(int i = 0; i < acks.size(); i++){
 		cout << i << ". ack:" << acks[i] << endl;
-	}
+	}*/
 
 	return 0;
 }

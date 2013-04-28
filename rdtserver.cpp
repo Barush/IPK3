@@ -154,6 +154,7 @@ int main(int argc, char **argv){
 
 		if(FD_ISSET(udt, &udt_stdin)){
 			if(udt_recv(udt, tempstr, 500, &dest_address, &dest_port)){
+				//cerr << "Neco prislo:" << getPackId(tempstr) << endl;
 				//cout << "Received: " << endl << tempstr << endl;
 				packet = "";
 				packet.append(tempstr);
