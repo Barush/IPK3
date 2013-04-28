@@ -59,16 +59,16 @@ int getTack(string packet){
 	return ret;
 }
 
-string createXML(int sn, string data, int window_size, int time){
+string createXMLPacket(int sn, string data, int window_size, int time){
 	string value = "<rdt-segment id=\"xskriv01\">\n<header sn=\"";
 	value.append(convertInt(sn));
 	value.append( "\" ack=\"potvrzeni\" win=\"");
 	value.append(convertInt(window_size));
 	value.append("\" tack=\"");
 	value.append(convertInt(time));
-	value.append("\"> </header> \n<data>\n");
+	value.append("\"> </header> \n<data>");
 	value.append(data);
-	value.append("\n</data>\n</rdt-segment>\n");
+	value.append("\n</data>\n</rdt-segment>");
 	return value;
 }
 
@@ -147,15 +147,16 @@ int main(int argc, char **argv){
 
     //promenne potrebne uvnitr while cyklu
     int packet_id = 0, acked, to_send = 0;
+    char tempstr[500];
     string packet = "";
     int end = 0, lastSend = 0, acking = 0;
     int window_size = 1;
     timeval timer;
     int tack;
-    int timeout1 = 1000, timeout2 = 1000, timeout3 = 1000, timeout;
+    int timeout1 = 10000, timeout2 = 1000, timeout3 = 1000, timeout;
 
 	while((sel = select(udt + 1, &udt_stdin, NULL, NULL, &tv)) && !end){
-		if(sel == -1){
+		if(sel < 0){
 			cerr << "Nastala chyba pri volani select!";
 			return EXIT_FAILURE;
 		}
@@ -164,52 +165,60 @@ int main(int argc, char **argv){
 		if(!lastSend && !acking){
 			for(int i = to_send; i < to_send + window_size; i++){
 				//posledni posilani se zdarilo
-				if(packet_id == to_send){
+				if(packet_id == i){
 					lastSend = readPacket(&packet);
 					gettimeofday(&timer, NULL);
 					tack = timer.tv_usec / 1000;
 					timeout = (tack + ((2*timeout1 + timeout2 + timeout3) / 4) )/2;
 					timeout *= 1.3;
-					packet = createXML(packet_id, packet, window_size, timeout);
+					packet = createXMLPacket(packet_id, packet, window_size, timeout);
 					XMLpackets.push_back(packet);
 					timers.push_back(timeout);
 					acks.push_back(0);
+					packet_id++;
 				}
+				//cout << "Pack id: " << packet_id << " to_send: " << to_send  << " i:" << i << endl;
 				cout << "ze struktury: " << endl << XMLpackets.at(i);
 				if(!udt_send(udt, dest_address, dest_port, (void *)XMLpackets.at(i).c_str(), XMLpackets.at(i).size())){
-					cerr << "Nastala chyba pri volani udt_send!" << endl;
-					return EXIT_FAILURE;
+					//cerr << "Nastala chyba pri volani udt_send!" << endl;
+					//return EXIT_FAILURE;
 				}
 				acking = 1;
-				timers.at(packet_id) = tack;
-				packet_id++;
+				timers.at(i) = tack;
 				if(lastSend)
 					break;
 			}
 		}
 
 		//prijimani acks
-		if(udt_recv(udt, &packet, 500, &dest_address, &dest_port)){
+		if(udt_recv(udt, tempstr, 500, &dest_address, &dest_port)){
+			packet.append(tempstr);
+			gettimeofday(&timer, NULL);
+			tack = timer.tv_usec / 1000;
+			timeout3 = timeout2;
+			timeout2 = timeout1;
+			timeout1 = tack - getTack(packet);
 			acked = getPackId(packet);
+			cout << "Got acked: " << acked << endl;	
+			acks.at(acked) = 1;
 			acked++;
 			to_send = acked;
-			for(int i = 0; i < acked; i++){
-				acks.at(i) = 1;
-			}
-			window_size *= 2;
+			window_size++;
 			acking = 0;
 		}
 
 		//vyprsel casovac
 		gettimeofday(&timer, NULL);
 		tack = timer.tv_usec / 1000;
-		if( (acks.at(packet_id - 1) == 0) && (tack > timers.at(packet_id - 1)) ){
+		if( acking && (acks.at(packet_id - 1) == 0) && (tack > timers.at(packet_id - 1)) ){
+			cout << "Timeout" << endl;
+			window_size--;
 			lastSend = 0;
 			acking = 0;
 		}
 
 		//prisly nam vsechny acks - pokud je potvrzen posledni, potvrzuje tim i vsechny predchazejici
-		if(acks.at(acks.size() - 1) == 1)
+		if(lastSend && (acks.at(acks.size() - 1) == 1))
 			end = 1;
 
 	}
